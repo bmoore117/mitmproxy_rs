@@ -80,7 +80,7 @@ impl PacketSourceConf for UdpConf {
             UdpTask {
                 socket,
                 local_addr,
-                handler: UdpHandler::new(),
+                handler: UdpHandler::new(None),
                 transport_events_tx,
                 transport_commands_rx,
                 shutdown,

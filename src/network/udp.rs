@@ -10,6 +10,8 @@ use crate::messages::{
     ConnectionId, ConnectionIdGenerator, SmolPacket, TransportCommand, TransportEvent, TunnelInfo,
 };
 use crate::network::filter::should_drop;
+use crate::network::icmp::build_icmp_port_unreachable;
+use crate::messages::NetworkCommand;
 use internet_packet::InternetPacket;
 use smoltcp::phy::ChecksumCapabilities;
 
@@ -63,16 +65,18 @@ pub const UDP_TIMEOUT: Duration = Duration::from_secs(60);
 type FourTuple = (SocketAddr, SocketAddr);
 
 pub struct UdpHandler {
+    net_tx: Option<tokio::sync::mpsc::Sender<NetworkCommand>>,
     connection_id_generator: ConnectionIdGenerator,
     id_lookup: LruCache<FourTuple, ConnectionId>,
     connections: LruCache<ConnectionId, (ConnectionState, FourTuple)>,
 }
 
 impl UdpHandler {
-    pub fn new() -> Self {
+    pub fn new(net_tx: Option<tokio::sync::mpsc::Sender<NetworkCommand>>) -> Self {
         // This implementation is largely based on the fact that LruCache eventually
         // drops the state, which closes the respective channels.
         Self {
+            net_tx,
             connections: LruCache::with_expiry_duration(UDP_TIMEOUT),
             id_lookup: LruCache::with_expiry_duration(UDP_TIMEOUT),
             connection_id_generator: ConnectionIdGenerator::udp(),
@@ -139,6 +143,14 @@ impl UdpHandler {
         permit: Permit<'_, TransportEvent>,
     ) {
         if should_drop(&tunnel_info) {
+            let original = SmolPacket::from(packet);
+            if let (Some(net_tx), Some(response)) =
+                (self.net_tx.as_ref(), build_icmp_port_unreachable(original))
+            {
+                if net_tx.try_send(NetworkCommand::SendPacket(response)).is_err() {
+                    log::debug!("Channel unavailable, discarding ICMP port unreachable.");
+                }
+            }
             return;
         }
 
