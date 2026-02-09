@@ -30,6 +30,7 @@ tokio = { version = "1.48", features = ["macros", "net", "rt-multi-thread", "syn
 boringtun = "0.6"
 tar = "0.4.44"
 console-subscriber = { version = "0.5.0", optional = true }
+notify = "8.2.0"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 nix = { version = "0.30.1", features = ["user"] }

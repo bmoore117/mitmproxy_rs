@@ -1,4 +1,8 @@
 use mitmproxy::intercept_conf::InterceptConf;
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use std::path::PathBuf;
+use std::sync::mpsc as std_mpsc;
+use std::time::Duration;
 use pyo3::exceptions::PyValueError;
 
 #[cfg(target_os = "linux")]
@@ -19,14 +23,21 @@ pub struct LocalRedirector {
     server: Server,
     conf_tx: mpsc::UnboundedSender<InterceptConf>,
     spec: String,
+    watcher: Option<InterceptWatcher>,
+}
+
+struct InterceptWatcher {
+    stop_tx: std_mpsc::Sender<()>,
 }
 
 impl LocalRedirector {
     pub fn new(server: Server, conf_tx: mpsc::UnboundedSender<InterceptConf>) -> Self {
+        let watcher = start_intercept_watcher(conf_tx.clone());
         Self {
             server,
             conf_tx,
             spec: "inactive".to_string(),
+            watcher,
         }
     }
 }
@@ -86,6 +97,79 @@ impl LocalRedirector {
     pub fn __repr__(&self) -> String {
         format!("Local Redirector({})", self.spec)
     }
+}
+
+impl Drop for LocalRedirector {
+    fn drop(&mut self) {
+        if let Some(watcher) = self.watcher.take() {
+            let _ = watcher.stop_tx.send(());
+        }
+    }
+}
+
+fn start_intercept_watcher(
+    conf_tx: mpsc::UnboundedSender<InterceptConf>,
+) -> Option<InterceptWatcher> {
+    let path = std::env::var_os("MITMPROXY_INTERCEPT_CONF_PATH").map(PathBuf::from)?;
+    let (stop_tx, stop_rx) = std_mpsc::channel();
+
+    std::thread::spawn(move || {
+        let (event_tx, event_rx) = std_mpsc::channel();
+        let mut watcher = match notify::recommended_watcher(move |res| {
+            let _ = event_tx.send(res);
+        }) {
+            Ok(watcher) => watcher,
+            Err(err) => {
+                log::warn!("Failed to create file watcher: {err:?}");
+                return;
+            }
+        };
+
+        if let Err(err) = watcher.watch(&path, RecursiveMode::NonRecursive) {
+            log::warn!("Failed to watch {}: {err:?}", path.display());
+            return;
+        }
+
+        let mut last_spec: Option<String> = None;
+        let mut reload = || {
+            let Ok(content) = std::fs::read_to_string(&path) else {
+                return;
+            };
+            let spec = content.trim().to_string();
+            if last_spec.as_deref() == Some(&spec) {
+                return;
+            }
+            match InterceptConf::try_from(spec.as_str()) {
+                Ok(conf) => {
+                    last_spec = Some(spec);
+                    if conf_tx.send(conf).is_err() {
+                        log::warn!("Intercept watcher failed to send updated config.");
+                    }
+                }
+                Err(err) => {
+                    log::warn!("Invalid intercept spec in {}: {err:?}", path.display());
+                }
+            }
+        };
+
+        reload();
+
+        loop {
+            if stop_rx.try_recv().is_ok() {
+                break;
+            }
+            match event_rx.recv_timeout(Duration::from_millis(250)) {
+                Ok(Ok(_event)) => reload(),
+                Ok(Err(err)) => {
+                    log::debug!("Watch error for {}: {err:?}", path.display());
+                }
+                Err(std_mpsc::RecvTimeoutError::Timeout) => {}
+                Err(std_mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        }
+    });
+
+    Some(InterceptWatcher { stop_tx })
 }
 
 /// Start an OS-level proxy to intercept traffic from the current machine.
