@@ -24,7 +24,7 @@ impl NetworkStack<'_> {
     pub fn new(net_tx: Sender<NetworkCommand>) -> Self {
         Self {
             tcp: TcpHandler::new(net_tx.clone()),
-            udp: UdpHandler::new(),
+            udp: UdpHandler::new(Some(net_tx.clone())),
             net_tx,
         }
     }
@@ -52,10 +52,12 @@ impl NetworkStack<'_> {
             IpProtocol::Tcp => self.tcp.receive_packet(packet, tunnel_info, permit),
             IpProtocol::Udp => {
                 match UdpPacket::try_from(packet) {
-                    Ok(packet) => self.udp.receive_data(packet, tunnel_info, permit),
+                    Ok(packet) => {
+                        self.udp.receive_data(packet, tunnel_info, permit);
+                        Ok(())
+                    }
                     Err(e) => log::debug!("Received invalid UDP packet: {e}"),
-                };
-                Ok(())
+                }
             }
             IpProtocol::Icmp => self.receive_packet_icmp(packet),
             IpProtocol::Icmpv6 => self.receive_packet_icmp(packet),

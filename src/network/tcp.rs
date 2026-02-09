@@ -10,7 +10,7 @@ use smoltcp::wire::{HardwareAddress, Ipv6Address};
 use smoltcp::{
     iface::{Interface, SocketHandle},
     time::Instant,
-    wire::{IpAddress, IpCidr, Ipv4Address, TcpPacket},
+    wire::{IpAddress, IpCidr, IpProtocol, IpRepr, Ipv4Address, Ipv4Repr, Ipv6Repr, TcpControl, TcpPacket, TcpRepr, TcpSeqNumber},
 };
 use std::time::Duration;
 use tokio::sync::{
@@ -47,6 +47,7 @@ pub struct TcpHandler<'a> {
     iface: Interface,
     device: VirtualDevice,
     sockets: SocketSet<'a>,
+    net_tx: Sender<NetworkCommand>,
     socket_data: HashMap<ConnectionId, SocketData>,
     remove_conns: Vec<ConnectionId>,
     active_connections: HashSet<(SocketAddr, SocketAddr)>,
@@ -54,7 +55,7 @@ pub struct TcpHandler<'a> {
 
 impl TcpHandler<'_> {
     pub fn new(net_tx: Sender<NetworkCommand>) -> Self {
-        let mut device = VirtualDevice::new(net_tx);
+        let mut device = VirtualDevice::new(net_tx.clone());
 
         let config = Config::new(HardwareAddress::Ip);
         let mut iface = Interface::new(config, &mut device, Instant::now());
@@ -82,6 +83,7 @@ impl TcpHandler<'_> {
             iface,
             device,
             sockets: SocketSet::new(Vec::new()),
+            net_tx,
             socket_data: HashMap::new(),
             active_connections: HashSet::new(),
             connection_id_generator: ConnectionIdGenerator::tcp(),
@@ -122,6 +124,9 @@ impl TcpHandler<'_> {
         let dst_addr = SocketAddr::new(dst_ip, tcp_packet.dst_port());
 
         if should_drop(&tunnel_info) {
+            if !tcp_packet.rst() {
+                self.send_tcp_rst(&tcp_packet, src_addr, dst_addr);
+            }
             return Ok(());
         }
 
@@ -165,6 +170,91 @@ impl TcpHandler<'_> {
 
         self.device.receive_packet(packet);
         Ok(())
+    }
+
+    fn send_tcp_rst(
+        &self,
+        tcp_packet: &TcpPacket<&mut [u8]>,
+        src_addr: SocketAddr,
+        dst_addr: SocketAddr,
+    ) {
+        let (seq_number, ack_number) = if tcp_packet.ack() {
+            (tcp_packet.ack_number(), None)
+        } else {
+            (
+                TcpSeqNumber(0),
+                Some(tcp_packet.seq_number() + tcp_packet.segment_len()),
+            )
+        };
+
+        let tcp_repr = TcpRepr {
+            src_port: dst_addr.port(),
+            dst_port: src_addr.port(),
+            control: TcpControl::Rst,
+            seq_number,
+            ack_number,
+            window_len: 0,
+            window_scale: None,
+            max_seg_size: None,
+            sack_permitted: false,
+            sack_ranges: [None, None, None],
+            timestamp: None,
+            payload: &[],
+        };
+
+        let (packet, src_ip, dst_ip) = match (src_addr, dst_addr) {
+            (SocketAddr::V4(src_addr), SocketAddr::V4(dst_addr)) => {
+                let ip_repr = Ipv4Repr {
+                    src_addr: *dst_addr.ip(),
+                    dst_addr: *src_addr.ip(),
+                    next_header: IpProtocol::Tcp,
+                    payload_len: tcp_repr.header_len(),
+                    hop_limit: 255,
+                };
+                let buf = vec![0u8; IpRepr::Ipv4(ip_repr).buffer_len()];
+                let mut ip_packet = smoltcp::wire::Ipv4Packet::new_unchecked(buf);
+                ip_repr.emit(&mut ip_packet, &smoltcp::phy::ChecksumCapabilities::default());
+                tcp_repr.emit(
+                    &mut TcpPacket::new_unchecked(ip_packet.payload_mut()),
+                    &ip_repr.src_addr.into(),
+                    &ip_repr.dst_addr.into(),
+                    &smoltcp::phy::ChecksumCapabilities::default(),
+                );
+                (SmolPacket::from(ip_packet), src_addr.ip(), dst_addr.ip())
+            }
+            (SocketAddr::V6(src_addr), SocketAddr::V6(dst_addr)) => {
+                let ip_repr = Ipv6Repr {
+                    src_addr: *dst_addr.ip(),
+                    dst_addr: *src_addr.ip(),
+                    next_header: IpProtocol::Tcp,
+                    payload_len: tcp_repr.header_len(),
+                    hop_limit: 255,
+                };
+                let buf = vec![0u8; IpRepr::Ipv6(ip_repr).buffer_len()];
+                let mut ip_packet = smoltcp::wire::Ipv6Packet::new_unchecked(buf);
+                ip_repr.emit(&mut ip_packet);
+                tcp_repr.emit(
+                    &mut TcpPacket::new_unchecked(ip_packet.payload_mut()),
+                    &ip_repr.src_addr.into(),
+                    &ip_repr.dst_addr.into(),
+                    &smoltcp::phy::ChecksumCapabilities::default(),
+                );
+                (SmolPacket::from(ip_packet), src_addr.ip(), dst_addr.ip())
+            }
+            _ => return,
+        };
+
+        if self
+            .net_tx
+            .try_send(NetworkCommand::SendPacket(packet))
+            .is_err()
+        {
+            log::debug!(
+                "Channel unavailable, discarding TCP RST {} -> {}.",
+                src_ip,
+                dst_ip
+            );
+        }
     }
 
     pub fn poll_delay(&mut self) -> Option<Duration> {
