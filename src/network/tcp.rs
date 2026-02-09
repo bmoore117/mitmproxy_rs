@@ -22,6 +22,7 @@ use crate::messages::{
     ConnectionId, ConnectionIdGenerator, NetworkCommand, SmolPacket, TransportCommand,
     TransportEvent, TunnelInfo,
 };
+use crate::network::filter::should_drop;
 
 use super::virtual_device::VirtualDevice;
 
@@ -119,6 +120,10 @@ impl TcpHandler<'_> {
 
         let src_addr = SocketAddr::new(src_ip, tcp_packet.src_port());
         let dst_addr = SocketAddr::new(dst_ip, tcp_packet.dst_port());
+
+        if should_drop(&tunnel_info) {
+            return Ok(());
+        }
 
         if tcp_packet.syn()
             && !tcp_packet.ack()

@@ -2,6 +2,7 @@ mod task;
 pub use task::NetworkTask;
 pub use task::add_network_layer;
 
+mod filter;
 mod virtual_device;
 
 mod core;

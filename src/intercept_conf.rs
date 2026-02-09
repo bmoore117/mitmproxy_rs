@@ -1,4 +1,5 @@
 use anyhow::{anyhow, ensure};
+use std::sync::{LazyLock, RwLock};
 
 pub type PID = u32;
 
@@ -121,6 +122,10 @@ impl InterceptConf {
         self.actions.iter().map(|a| a.to_string()).collect()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.actions.is_empty()
+    }
+
     pub fn default(&self) -> bool {
         self.default
     }
@@ -160,6 +165,22 @@ impl InterceptConf {
             .collect();
         parts.join(" ")
     }
+}
+
+static INTERCEPT_CONF_STATE: LazyLock<RwLock<InterceptConf>> =
+    LazyLock::new(|| RwLock::new(InterceptConf::disabled()));
+
+pub fn set_intercept_conf(conf: InterceptConf) {
+    if let Ok(mut guard) = INTERCEPT_CONF_STATE.write() {
+        *guard = conf;
+    }
+}
+
+pub fn get_intercept_conf() -> InterceptConf {
+    INTERCEPT_CONF_STATE
+        .read()
+        .map(|guard| guard.clone())
+        .unwrap_or_else(|_| InterceptConf::disabled())
 }
 
 #[cfg(test)]
