@@ -1,4 +1,4 @@
-use crate::intercept_conf::InterceptConf;
+use crate::intercept_conf::{set_intercept_conf, InterceptConf};
 use crate::ipc::PacketWithMeta;
 use crate::messages::{
     NetworkCommand, NetworkEvent, SmolPacket, TransportCommand, TransportEvent, TunnelInfo,
@@ -65,6 +65,7 @@ async fn forward_packets<T: AsyncRead + AsyncWrite + Unpin>(
             exit = &mut network_task_handle => break exit.context("network task panic")?.context("network task error")?,
             // pipe through changes to the intercept list
             Some(conf) = conf_rx.recv() => {
+                set_intercept_conf(conf.clone());
                 let msg = ipc::FromProxy {
                     message: Some(ipc::from_proxy::Message::InterceptConf(conf.into())),
                 };

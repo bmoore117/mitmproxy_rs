@@ -9,6 +9,7 @@ use tokio::sync::oneshot;
 use crate::messages::{
     ConnectionId, ConnectionIdGenerator, SmolPacket, TransportCommand, TransportEvent, TunnelInfo,
 };
+use crate::network::filter::should_drop;
 use internet_packet::InternetPacket;
 use smoltcp::phy::ChecksumCapabilities;
 
@@ -137,6 +138,10 @@ impl UdpHandler {
         tunnel_info: TunnelInfo,
         permit: Permit<'_, TransportEvent>,
     ) {
+        if should_drop(&tunnel_info) {
+            return;
+        }
+
         let potential_cid = self
             .id_lookup
             .get(&(packet.src_addr, packet.dst_addr))
