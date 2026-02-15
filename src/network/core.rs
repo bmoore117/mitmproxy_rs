@@ -50,18 +50,16 @@ impl NetworkStack<'_> {
 
         match packet.transport_protocol() {
             IpProtocol::Tcp => self.tcp.receive_packet(packet, tunnel_info, permit),
-            IpProtocol::Udp => {
-                match UdpPacket::try_from(packet) {
-                    Ok(packet) => {
-                        self.udp.receive_data(packet, tunnel_info, permit);
-                        Ok(())
-                    }
-                    Err(e) => {
-                        log::info!("Received invalid UDP packet: {e}");
-                        Ok(())
-                    }
+            IpProtocol::Udp => match UdpPacket::try_from(packet) {
+                Ok(packet) => {
+                    self.udp.receive_data(packet, tunnel_info, permit);
+                    Ok(())
                 }
-            }
+                Err(e) => {
+                    log::info!("Received invalid UDP packet: {e}");
+                    Ok(())
+                }
+            },
             IpProtocol::Icmp => self.receive_packet_icmp(packet),
             IpProtocol::Icmpv6 => self.receive_packet_icmp(packet),
             _ => {
