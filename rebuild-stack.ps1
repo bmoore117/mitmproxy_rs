@@ -22,14 +22,8 @@ Run-Step "Creating virtualenv (Python 3.12 required)" {
 
 $PythonExe = Join-Path $VenvPath "Scripts\python.exe"
 
-Run-Step "Upgrading pip" { & $PythonExe -m pip install --upgrade pip }
-
 Run-Step "Removing old mitmproxy-rs/mitmproxy-windows installs" {
   & $PythonExe -m pip uninstall -y mitmproxy-rs mitmproxy_rs mitmproxy-windows
-}
-
-Run-Step "Installing mitmproxy (editable)" {
-  & $PythonExe -m pip install -e $MitmproxyPath
 }
 
 Run-Step "Building mitmproxy_rs (Rust extension)" {
