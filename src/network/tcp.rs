@@ -10,7 +10,10 @@ use smoltcp::wire::{HardwareAddress, Ipv6Address};
 use smoltcp::{
     iface::{Interface, SocketHandle},
     time::Instant,
-    wire::{IpAddress, IpCidr, IpProtocol, IpRepr, Ipv4Address, Ipv4Repr, Ipv6Repr, TcpControl, TcpPacket, TcpRepr, TcpSeqNumber},
+    wire::{
+        IpAddress, IpCidr, IpProtocol, IpRepr, Ipv4Address, Ipv4Repr, Ipv6Repr, TcpControl,
+        TcpPacket, TcpRepr, TcpSeqNumber,
+    },
 };
 use std::time::Duration;
 use tokio::sync::{
@@ -18,6 +21,7 @@ use tokio::sync::{
     oneshot,
 };
 
+use crate::intercept_conf::Transport;
 use crate::messages::{
     ConnectionId, ConnectionIdGenerator, NetworkCommand, SmolPacket, TransportCommand,
     TransportEvent, TunnelInfo,
@@ -123,7 +127,7 @@ impl TcpHandler<'_> {
         let src_addr = SocketAddr::new(src_ip, tcp_packet.src_port());
         let dst_addr = SocketAddr::new(dst_ip, tcp_packet.dst_port());
 
-        if should_drop(&tunnel_info) {
+        if should_drop(&tunnel_info, Transport::Tcp, src_addr, dst_addr) {
             if !tcp_packet.rst() {
                 self.send_tcp_rst(&tcp_packet, src_addr, dst_addr);
             }
@@ -213,7 +217,10 @@ impl TcpHandler<'_> {
                 };
                 let buf = vec![0u8; IpRepr::Ipv4(ip_repr).buffer_len()];
                 let mut ip_packet = smoltcp::wire::Ipv4Packet::new_unchecked(buf);
-                ip_repr.emit(&mut ip_packet, &smoltcp::phy::ChecksumCapabilities::default());
+                ip_repr.emit(
+                    &mut ip_packet,
+                    &smoltcp::phy::ChecksumCapabilities::default(),
+                );
                 tcp_repr.emit(
                     &mut TcpPacket::new_unchecked(ip_packet.payload_mut()),
                     &ip_repr.src_addr.into(),

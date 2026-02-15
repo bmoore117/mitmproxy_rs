@@ -1,9 +1,9 @@
-use mitmproxy::intercept_conf::{InterceptConf, set_intercept_conf};
+use mitmproxy::intercept_conf::{InterceptConf, load_config_document};
 use notify::{RecursiveMode, Watcher};
+use pyo3::exceptions::PyValueError;
 use std::path::PathBuf;
 use std::sync::mpsc as std_mpsc;
 use std::time::Duration;
-use pyo3::exceptions::PyValueError;
 
 #[cfg(target_os = "linux")]
 use mitmproxy::packet_sources::linux::LinuxConf;
@@ -45,8 +45,11 @@ impl LocalRedirector {
 
 #[pymethods]
 impl LocalRedirector {
-    /// Return a textual description of the given spec,
+    /// Return a textual description of the redirector interception spec,
     /// or raise a ValueError if the spec is invalid.
+    ///
+    /// This only controls which flows the OS redirector forwards to mitmproxy-rs.
+    /// It does not configure JSON-based network blocking policy decisions.
     #[staticmethod]
     fn describe_spec(spec: &str) -> PyResult<String> {
         InterceptConf::try_from(spec)
@@ -54,7 +57,10 @@ impl LocalRedirector {
             .map_err(|e| PyValueError::new_err(format!("{e:?}")))
     }
 
-    /// Set a new intercept spec.
+    /// Set a new redirector interception spec.
+    ///
+    /// This only affects redirector flow selection. Network drop/block behavior is
+    /// configured separately through MITMPROXY_NETWORK_POLICY_PATH.
     pub fn set_intercept(&mut self, spec: String) -> PyResult<()> {
         let conf = InterceptConf::try_from(spec.as_str())?;
         self.spec = spec;
@@ -109,7 +115,7 @@ impl Drop for LocalRedirector {
 }
 
 fn start_intercept_watcher() -> Option<InterceptWatcher> {
-    let path = std::env::var_os("MITMPROXY_INTERCEPT_CONF_PATH").map(PathBuf::from)?;
+    let path = std::env::var_os("MITMPROXY_NETWORK_POLICY_PATH").map(PathBuf::from)?;
     let (stop_tx, stop_rx) = std_mpsc::channel();
 
     std::thread::spawn(move || {
@@ -145,14 +151,16 @@ fn start_intercept_watcher() -> Option<InterceptWatcher> {
             if last_spec.as_deref() == Some(&spec) {
                 return;
             }
-            match InterceptConf::try_from(spec.as_str()) {
-                Ok(conf) => {
+            match load_config_document(spec.as_str()) {
+                Ok(()) => {
                     last_spec = Some(spec);
-                    set_intercept_conf(conf);
-                    log::info!("Intercept watcher loaded {}", path.display());
+                    log::info!("Network block policy watcher loaded {}", path.display());
                 }
                 Err(err) => {
-                    log::warn!("Invalid intercept spec in {}: {err:?}", path.display());
+                    log::warn!(
+                        "Invalid network block policy in {}: {err:?}",
+                        path.display()
+                    );
                 }
             }
         };

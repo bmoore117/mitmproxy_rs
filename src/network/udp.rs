@@ -6,12 +6,13 @@ use lru_time_cache::LruCache;
 use tokio::sync::mpsc::Permit;
 use tokio::sync::oneshot;
 
+use crate::intercept_conf::Transport;
+use crate::messages::NetworkCommand;
 use crate::messages::{
     ConnectionId, ConnectionIdGenerator, SmolPacket, TransportCommand, TransportEvent, TunnelInfo,
 };
 use crate::network::filter::should_drop;
 use crate::network::icmp::build_icmp_port_unreachable;
-use crate::messages::NetworkCommand;
 use internet_packet::InternetPacket;
 use smoltcp::phy::ChecksumCapabilities;
 
@@ -142,12 +143,20 @@ impl UdpHandler {
         tunnel_info: TunnelInfo,
         permit: Permit<'_, TransportEvent>,
     ) {
-        if should_drop(&tunnel_info) {
+        if should_drop(
+            &tunnel_info,
+            Transport::Udp,
+            packet.src_addr,
+            packet.dst_addr,
+        ) {
             let original = SmolPacket::from(packet);
             if let (Some(net_tx), Some(response)) =
                 (self.net_tx.as_ref(), build_icmp_port_unreachable(original))
             {
-                if net_tx.try_send(NetworkCommand::SendPacket(response)).is_err() {
+                if net_tx
+                    .try_send(NetworkCommand::SendPacket(response))
+                    .is_err()
+                {
                     log::debug!("Channel unavailable, discarding ICMP port unreachable.");
                 }
             }

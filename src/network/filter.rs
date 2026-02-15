@@ -1,22 +1,21 @@
-use crate::intercept_conf::{get_intercept_conf, ProcessInfo};
+use crate::intercept_conf::{ProcessInfo, Transport, decide_drop};
 use crate::messages::TunnelInfo;
+use std::net::SocketAddr;
 
 const INTERCEPT_TRACE_TAG: &str = "[INTERCEPT_TRACE]";
 
-pub(crate) fn should_drop(tunnel_info: &TunnelInfo) -> bool {
+pub(crate) fn should_drop(
+    tunnel_info: &TunnelInfo,
+    transport: Transport,
+    src_addr: SocketAddr,
+    dst_addr: SocketAddr,
+) -> bool {
     let TunnelInfo::LocalRedirector {
-        pid,
-        process_name,
-        ..
+        pid, process_name, ..
     } = tunnel_info
     else {
         return false;
     };
-
-    let conf = get_intercept_conf();
-    if conf.is_empty() {
-        return false;
-    }
 
     if pid.is_none() && process_name.is_none() {
         return false;
@@ -27,13 +26,18 @@ pub(crate) fn should_drop(tunnel_info: &TunnelInfo) -> bool {
         process_name: process_name.clone(),
     };
 
-    let intercept = conf.should_intercept(&info);
-    log::info!(
-        "{INTERCEPT_TRACE_TAG} Local redirect decision: intercept={} pid={:?} process={:?} actions={:?}",
-        intercept,
-        pid,
-        process_name,
-        conf.actions()
-    );
-    !intercept
+    let decision = decide_drop(transport, dst_addr, &info);
+    if decision.log {
+        log::info!(
+            "{INTERCEPT_TRACE_TAG} Unified policy decision: drop={} reason={} transport={:?} src={} dst={} pid={:?} process={:?}",
+            decision.drop,
+            decision.reason,
+            transport,
+            src_addr,
+            dst_addr,
+            pid,
+            process_name
+        );
+    }
+    decision.drop
 }
