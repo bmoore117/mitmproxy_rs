@@ -1,3 +1,4 @@
+use std::env;
 use std::iter;
 use std::os::windows::ffi::OsStrExt;
 use std::path::PathBuf;
@@ -63,6 +64,11 @@ impl PacketSourceConf for WindowsConf {
             .chain(iter::once(0))
             .collect::<Vec<u16>>();
 
+        let show_redirector_window = cfg!(debug_assertions)
+            || env::var_os("MITMPROXY_WINDOWS_REDIRECTOR_SHOW")
+                .map(|v| v == "1")
+                .unwrap_or(false);
+
         let result = unsafe {
             ShellExecuteW(
                 None,
@@ -70,7 +76,7 @@ impl PacketSourceConf for WindowsConf {
                 PCWSTR::from_raw(executable_path.as_ptr()),
                 PCWSTR::from_raw(pipe_name.as_ptr()),
                 None,
-                if cfg!(debug_assertions) {
+                if show_redirector_window {
                     SW_SHOWNORMAL
                 } else {
                     SW_HIDE

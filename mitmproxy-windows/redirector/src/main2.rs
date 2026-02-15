@@ -88,9 +88,7 @@ impl ActiveListeners {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    if cfg!(debug_assertions) {
-        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-    }
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let args: Vec<String> = env::args().collect();
     let pipe_name = args
         .get(1)
@@ -277,7 +275,16 @@ async fn main() -> Result<()> {
                             }
                         };
 
-                        let action = if state.should_intercept(&proc_info) {
+                        let should_intercept = state.should_intercept(&proc_info);
+                        info!(
+                            "Socket decision: event={:?} intercept={} pid={} process={:?} conn={}",
+                            address.event(),
+                            should_intercept,
+                            proc_info.pid,
+                            proc_info.process_name,
+                            connection_id
+                        );
+                        let action = if should_intercept {
                             ConnectionAction::Intercept(proc_info)
                         } else {
                             ConnectionAction::None
@@ -355,6 +362,7 @@ async fn main() -> Result<()> {
             Event::Ipc(ipc::from_proxy::Message::InterceptConf(conf)) => {
                 state = conf.try_into()?;
                 info!("{}", state.description());
+                info!("Intercept actions: {:?}", state.actions());
 
                 // Handle preexisting connections.
                 connections.clear();
@@ -375,7 +383,15 @@ async fn main() -> Result<()> {
                             src: e.local_addr,
                             dst: e.remote_addr,
                         };
-                        let action = if state.should_intercept(&proc_info) {
+                        let should_intercept = state.should_intercept(&proc_info);
+                        info!(
+                            "Preexisting socket decision: intercept={} pid={} process={:?} conn={}",
+                            should_intercept,
+                            proc_info.pid,
+                            proc_info.process_name,
+                            connection_id
+                        );
+                        let action = if should_intercept {
                             ConnectionAction::Intercept(proc_info)
                         } else {
                             ConnectionAction::None

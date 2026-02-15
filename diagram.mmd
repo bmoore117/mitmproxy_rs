@@ -1,0 +1,19 @@
+flowchart TD
+    A["Process opens socket (e.g. powershell/pwsh + irm)"] --> B["Windows redirector (WinDivert socket + network events)"]
+    B --> C["Resolve PID and process path"]
+    C --> D["Apply InterceptConf actions + forced !mitmproxy_pid"]
+
+    D -->|intercept=true| E["Send packet + TunnelInfo over IPC"]
+    D -->|intercept=false| F["Pass-through reinject"]
+
+    E --> G["mitmproxy-rs packet source updates global InterceptConf state"]
+    G --> H["Network filter re-check: should_drop(pid, process, conf)"]
+
+    H -->|drop=false| I["Normal TCP/UDP handling to mitmproxy layers"]
+    H -->|drop=true TCP| J["Send TCP RST"]
+    H -->|drop=true UDP| K["Send ICMP Port Unreachable"]
+
+    I --> L["mitmproxy local transparent mode"]
+    L --> M["NextLayer protocol choice"]
+    M -->|dst port 53 or 5353| N["DNSLayer handles query/response"]
+    M -->|other destinations| O["HTTP/TLS/TCP/UDP layers"]

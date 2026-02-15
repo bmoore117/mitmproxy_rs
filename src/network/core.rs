@@ -56,7 +56,10 @@ impl NetworkStack<'_> {
                         self.udp.receive_data(packet, tunnel_info, permit);
                         Ok(())
                     }
-                    Err(e) => log::debug!("Received invalid UDP packet: {e}"),
+                    Err(e) => {
+                        log::info!("Received invalid UDP packet: {e}");
+                        Ok(())
+                    }
                 }
             }
             IpProtocol::Icmp => self.receive_packet_icmp(packet),

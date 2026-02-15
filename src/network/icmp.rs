@@ -1,12 +1,8 @@
 use crate::messages::SmolPacket;
-use smoltcp::wire::ip::checksum as ip_checksum;
-use smoltcp::wire::{
-    IpProtocol, IpRepr, Ipv4Packet, Ipv4Repr, Ipv6Packet, Ipv6Repr, IPV6_HEADER_LEN,
-};
 use smoltcp::phy::ChecksumCapabilities;
 use smoltcp::wire::{
     Icmpv4Message, Icmpv4Packet, Icmpv4Repr, Icmpv6Message, Icmpv6Packet, Icmpv6Repr, IpProtocol,
-    Ipv4Packet, Ipv4Repr, Ipv6Packet, Ipv6Repr,
+    IpRepr, Ipv4Packet, Ipv4Repr, Ipv6Packet, Ipv6Repr, IPV6_HEADER_LEN,
 };
 
 pub(super) fn handle_icmpv4_echo_request(
@@ -143,13 +139,11 @@ fn build_icmpv4_port_unreachable(original: Ipv4Packet<Vec<u8>>) -> Option<SmolPa
     ip_repr.emit(&mut output_packet, &ChecksumCapabilities::default());
 
     let icmp_payload = output_packet.payload_mut();
-    icmp_payload[0] = 3; // Destination Unreachable
-    icmp_payload[1] = 3; // Port Unreachable
-    // checksum at [2..4], unused at [4..8] are already zero
-    icmp_payload[8..8 + payload.len()].copy_from_slice(payload);
-
-    let checksum = !ip_checksum::data(icmp_payload);
-    icmp_payload[2..4].copy_from_slice(&checksum.to_be_bytes());
+    let mut icmp_packet = Icmpv4Packet::new_unchecked(icmp_payload);
+    icmp_packet.set_msg_type(Icmpv4Message::DstUnreachable);
+    icmp_packet.set_msg_code(3); // Port Unreachable
+    icmp_packet.data_mut()[4..4 + payload.len()].copy_from_slice(payload);
+    icmp_packet.fill_checksum();
 
     Some(SmolPacket::from(output_packet))
 }
@@ -175,17 +169,11 @@ fn build_icmpv6_port_unreachable(original: Ipv6Packet<Vec<u8>>) -> Option<SmolPa
     ip_repr.emit(&mut output_packet);
 
     let icmp_payload = output_packet.payload_mut();
-    icmp_payload[0] = 1; // Destination Unreachable
-    icmp_payload[1] = 4; // Port Unreachable
-    // checksum at [2..4], unused at [4..8] are already zero
-    icmp_payload[8..8 + payload.len()].copy_from_slice(payload);
-
-    let checksum = ip_checksum::combine(&[
-        ip_checksum::pseudo_header_v6(&dst_addr, &src_addr, IpProtocol::Icmpv6, icmp_len as u32),
-        ip_checksum::data(icmp_payload),
-    ]);
-    let checksum = !checksum;
-    icmp_payload[2..4].copy_from_slice(&checksum.to_be_bytes());
+    let mut icmp_packet = Icmpv6Packet::new_unchecked(icmp_payload);
+    icmp_packet.set_msg_type(Icmpv6Message::DstUnreachable);
+    icmp_packet.set_msg_code(4); // Port Unreachable
+    icmp_packet.payload_mut()[4..4 + payload.len()].copy_from_slice(payload);
+    icmp_packet.fill_checksum(&dst_addr, &src_addr);
 
     Some(SmolPacket::from(output_packet))
 }
