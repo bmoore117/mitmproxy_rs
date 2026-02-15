@@ -1,6 +1,8 @@
 use crate::intercept_conf::{get_intercept_conf, ProcessInfo};
 use crate::messages::TunnelInfo;
 
+const INTERCEPT_TRACE_TAG: &str = "[INTERCEPT_TRACE]";
+
 pub(crate) fn should_drop(tunnel_info: &TunnelInfo) -> bool {
     let TunnelInfo::LocalRedirector {
         pid,
@@ -27,7 +29,7 @@ pub(crate) fn should_drop(tunnel_info: &TunnelInfo) -> bool {
 
     let intercept = conf.should_intercept(&info);
     log::info!(
-        "Local redirect decision: intercept={} pid={:?} process={:?} actions={:?}",
+        "{INTERCEPT_TRACE_TAG} Local redirect decision: intercept={} pid={:?} process={:?} actions={:?}",
         intercept,
         pid,
         process_name,

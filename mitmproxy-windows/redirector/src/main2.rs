@@ -24,6 +24,8 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use windivert::address::WinDivertAddress;
 use windivert::prelude::*;
 
+const INTERCEPT_TRACE_TAG: &str = "[INTERCEPT_TRACE]";
+
 #[derive(Debug)]
 enum Event {
     NetworkPacket(WinDivertAddress<NetworkLayer>, Vec<u8>),
@@ -277,7 +279,7 @@ async fn main() -> Result<()> {
 
                         let should_intercept = state.should_intercept(&proc_info);
                         info!(
-                            "Socket decision: event={:?} intercept={} pid={} process={:?} conn={}",
+                            "{INTERCEPT_TRACE_TAG} Socket decision: event={:?} intercept={} pid={} process={:?} conn={}",
                             address.event(),
                             should_intercept,
                             proc_info.pid,
@@ -362,7 +364,7 @@ async fn main() -> Result<()> {
             Event::Ipc(ipc::from_proxy::Message::InterceptConf(conf)) => {
                 state = conf.try_into()?;
                 info!("{}", state.description());
-                info!("Intercept actions: {:?}", state.actions());
+                info!("{INTERCEPT_TRACE_TAG} Intercept actions: {:?}", state.actions());
 
                 // Handle preexisting connections.
                 connections.clear();
@@ -385,7 +387,7 @@ async fn main() -> Result<()> {
                         };
                         let should_intercept = state.should_intercept(&proc_info);
                         info!(
-                            "Preexisting socket decision: intercept={} pid={} process={:?} conn={}",
+                            "{INTERCEPT_TRACE_TAG} Preexisting socket decision: intercept={} pid={} process={:?} conn={}",
                             should_intercept,
                             proc_info.pid,
                             proc_info.process_name,
