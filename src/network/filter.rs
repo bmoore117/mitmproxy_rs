@@ -25,5 +25,13 @@ pub(crate) fn should_drop(tunnel_info: &TunnelInfo) -> bool {
         process_name: process_name.clone(),
     };
 
-    !conf.should_intercept(&info)
+    let intercept = conf.should_intercept(&info);
+    log::info!(
+        "Local redirect decision: intercept={} pid={:?} process={:?} actions={:?}",
+        intercept,
+        pid,
+        process_name,
+        conf.actions()
+    );
+    !intercept
 }

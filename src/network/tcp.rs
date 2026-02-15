@@ -202,7 +202,7 @@ impl TcpHandler<'_> {
             payload: &[],
         };
 
-        let (packet, src_ip, dst_ip) = match (src_addr, dst_addr) {
+        let packet = match (src_addr, dst_addr) {
             (SocketAddr::V4(src_addr), SocketAddr::V4(dst_addr)) => {
                 let ip_repr = Ipv4Repr {
                     src_addr: *dst_addr.ip(),
@@ -220,7 +220,7 @@ impl TcpHandler<'_> {
                     &ip_repr.dst_addr.into(),
                     &smoltcp::phy::ChecksumCapabilities::default(),
                 );
-                (SmolPacket::from(ip_packet), src_addr.ip(), dst_addr.ip())
+                SmolPacket::from(ip_packet)
             }
             (SocketAddr::V6(src_addr), SocketAddr::V6(dst_addr)) => {
                 let ip_repr = Ipv6Repr {
@@ -239,7 +239,7 @@ impl TcpHandler<'_> {
                     &ip_repr.dst_addr.into(),
                     &smoltcp::phy::ChecksumCapabilities::default(),
                 );
-                (SmolPacket::from(ip_packet), src_addr.ip(), dst_addr.ip())
+                SmolPacket::from(ip_packet)
             }
             _ => return,
         };
@@ -251,8 +251,8 @@ impl TcpHandler<'_> {
         {
             log::debug!(
                 "Channel unavailable, discarding TCP RST {} -> {}.",
-                src_ip,
-                dst_ip
+                src_addr,
+                dst_addr
             );
         }
     }

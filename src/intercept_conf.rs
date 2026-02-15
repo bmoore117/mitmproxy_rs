@@ -35,7 +35,16 @@ impl Pattern {
             Pattern::Process(name) => process_info
                 .process_name
                 .as_ref()
-                .map(|n| n.contains(name))
+                .map(|n| {
+                    #[cfg(windows)]
+                    {
+                        n.to_ascii_lowercase().contains(&name.to_ascii_lowercase())
+                    }
+                    #[cfg(not(windows))]
+                    {
+                        n.contains(name)
+                    }
+                })
                 .unwrap_or(false),
         }
     }
@@ -214,6 +223,16 @@ mod tests {
         let conf = InterceptConf::try_from("mitm").unwrap();
         assert!(!conf.should_intercept(&a));
         assert!(conf.should_intercept(&b));
+
+        #[cfg(windows)]
+        {
+            let p = ProcessInfo {
+                pid: 101,
+                process_name: Some("C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe".into()),
+            };
+            let conf = InterceptConf::try_from("!c:\\windows\\system32\\windowspowershell\\v1.0").unwrap();
+            assert!(!conf.should_intercept(&p));
+        }
 
         assert!(InterceptConf::try_from(",,").is_err());
     }
