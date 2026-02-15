@@ -1,4 +1,4 @@
-use mitmproxy::intercept_conf::InterceptConf;
+use mitmproxy::intercept_conf::{InterceptConf, set_intercept_conf};
 use notify::{RecursiveMode, Watcher};
 use std::path::PathBuf;
 use std::sync::mpsc as std_mpsc;
@@ -33,25 +33,13 @@ struct InterceptWatcher {
 
 impl LocalRedirector {
     pub fn new(server: Server, conf_tx: mpsc::UnboundedSender<InterceptConf>) -> Self {
-        let watcher = start_intercept_watcher(conf_tx.clone());
+        let watcher = start_intercept_watcher();
         Self {
             server,
             conf_tx,
             spec: "inactive".to_string(),
             watcher,
         }
-    }
-
-    fn conf_with_protected_pid(spec: &str) -> anyhow::Result<InterceptConf> {
-        // Always exclude the current mitmproxy process from local redirection.
-        let protected_pid = std::process::id();
-        let trimmed = spec.trim();
-        let guarded_spec = if trimmed.is_empty() {
-            format!("!{protected_pid}")
-        } else {
-            format!("{trimmed},!{protected_pid}")
-        };
-        InterceptConf::try_from(guarded_spec.as_str())
     }
 }
 
@@ -68,7 +56,7 @@ impl LocalRedirector {
 
     /// Set a new intercept spec.
     pub fn set_intercept(&mut self, spec: String) -> PyResult<()> {
-        let conf = Self::conf_with_protected_pid(spec.as_str())?;
+        let conf = InterceptConf::try_from(spec.as_str())?;
         self.spec = spec;
         self.conf_tx
             .send(conf)
@@ -120,9 +108,7 @@ impl Drop for LocalRedirector {
     }
 }
 
-fn start_intercept_watcher(
-    conf_tx: mpsc::UnboundedSender<InterceptConf>,
-) -> Option<InterceptWatcher> {
+fn start_intercept_watcher() -> Option<InterceptWatcher> {
     let path = std::env::var_os("MITMPROXY_INTERCEPT_CONF_PATH").map(PathBuf::from)?;
     let (stop_tx, stop_rx) = std_mpsc::channel();
 
@@ -159,14 +145,11 @@ fn start_intercept_watcher(
             if last_spec.as_deref() == Some(&spec) {
                 return;
             }
-            match LocalRedirector::conf_with_protected_pid(spec.as_str()) {
+            match InterceptConf::try_from(spec.as_str()) {
                 Ok(conf) => {
                     last_spec = Some(spec);
-                    if conf_tx.send(conf).is_err() {
-                        log::warn!("Intercept watcher failed to send updated config.");
-                    } else {
-                        log::info!("Intercept watcher loaded {}", path.display());
-                    }
+                    set_intercept_conf(conf);
+                    log::info!("Intercept watcher loaded {}", path.display());
                 }
                 Err(err) => {
                     log::warn!("Invalid intercept spec in {}: {err:?}", path.display());
