@@ -142,7 +142,7 @@ fn build_icmpv4_port_unreachable(original: Ipv4Packet<Vec<u8>>) -> Option<SmolPa
     let mut icmp_packet = Icmpv4Packet::new_unchecked(icmp_payload);
     icmp_packet.set_msg_type(Icmpv4Message::DstUnreachable);
     icmp_packet.set_msg_code(3); // Port Unreachable
-    icmp_packet.data_mut()[4..4 + payload.len()].copy_from_slice(payload);
+    icmp_packet.data_mut()[..payload.len()].copy_from_slice(payload);
     icmp_packet.fill_checksum();
 
     Some(SmolPacket::from(output_packet))
@@ -172,7 +172,7 @@ fn build_icmpv6_port_unreachable(original: Ipv6Packet<Vec<u8>>) -> Option<SmolPa
     let mut icmp_packet = Icmpv6Packet::new_unchecked(icmp_payload);
     icmp_packet.set_msg_type(Icmpv6Message::DstUnreachable);
     icmp_packet.set_msg_code(4); // Port Unreachable
-    icmp_packet.payload_mut()[4..4 + payload.len()].copy_from_slice(payload);
+    icmp_packet.payload_mut()[..payload.len()].copy_from_slice(payload);
     icmp_packet.fill_checksum(&dst_addr, &src_addr);
 
     Some(SmolPacket::from(output_packet))
