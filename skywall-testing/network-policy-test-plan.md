@@ -90,9 +90,6 @@ This plan validates `network-policy.sample.json` with local redirect mode and ho
 
 If you intentionally use exceptions:
 
-- `blocked_pid_exceptions`:
-  - Add active blocked PID to exception list.
-  - Expected `reason=blocked_pid_exception` and traffic allowed.
 - `blocked_cidr_exceptions`:
   - Add destination CIDR that overlaps blocked ranges.
   - Expected `reason=blocked_cidr_exception` and traffic allowed.
