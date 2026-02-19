@@ -1,4 +1,4 @@
-use mitmproxy::intercept_conf::{InterceptConf, load_config_document};
+use mitmproxy::intercept_conf::{InterceptConf, load_config_document, set_startup_intercept_conf};
 use notify::{RecursiveMode, Watcher};
 use pyo3::exceptions::PyValueError;
 use std::path::PathBuf;
@@ -33,12 +33,11 @@ struct InterceptWatcher {
 
 impl LocalRedirector {
     pub fn new(server: Server, conf_tx: mpsc::UnboundedSender<InterceptConf>) -> Self {
-        let watcher = start_intercept_watcher();
         Self {
             server,
             conf_tx,
             spec: "inactive".to_string(),
-            watcher,
+            watcher: None,
         }
     }
 }
@@ -48,8 +47,8 @@ impl LocalRedirector {
     /// Return a textual description of the redirector interception spec,
     /// or raise a ValueError if the spec is invalid.
     ///
-    /// This only controls which flows the OS redirector forwards to mitmproxy-rs.
-    /// It does not configure JSON-based network blocking policy decisions.
+    /// This helper only describes explicit intercept specs passed to `set_intercept`.
+    /// JSON-based policy files can also provide redirector exclusions.
     #[staticmethod]
     fn describe_spec(spec: &str) -> PyResult<String> {
         InterceptConf::try_from(spec)
@@ -59,14 +58,18 @@ impl LocalRedirector {
 
     /// Set a new redirector interception spec.
     ///
-    /// This only affects redirector flow selection. Network drop/block behavior is
-    /// configured separately through MITMPROXY_NETWORK_POLICY_PATH.
+    /// This affects redirector flow selection immediately. The JSON policy loaded
+    /// through MITMPROXY_NETWORK_POLICY_PATH can also update redirector exclusions.
     pub fn set_intercept(&mut self, spec: String) -> PyResult<()> {
         let conf = InterceptConf::try_from(spec.as_str())?;
+        set_startup_intercept_conf(conf.clone());
         self.spec = spec;
         self.conf_tx
             .send(conf)
             .map_err(crate::util::event_queue_unavailable)?;
+        if self.watcher.is_none() {
+            self.watcher = start_intercept_watcher(self.conf_tx.clone());
+        }
         Ok(())
     }
 
@@ -114,7 +117,9 @@ impl Drop for LocalRedirector {
     }
 }
 
-fn start_intercept_watcher() -> Option<InterceptWatcher> {
+fn start_intercept_watcher(
+    conf_tx: mpsc::UnboundedSender<InterceptConf>,
+) -> Option<InterceptWatcher> {
     let path = std::env::var_os("MITMPROXY_NETWORK_POLICY_PATH").map(PathBuf::from)?;
     let (stop_tx, stop_rx) = std_mpsc::channel();
 
@@ -152,7 +157,10 @@ fn start_intercept_watcher() -> Option<InterceptWatcher> {
                 return;
             }
             match load_config_document(spec.as_str()) {
-                Ok(()) => {
+                Ok(conf) => {
+                    if conf_tx.send(conf).is_err() {
+                        log::warn!("Failed to dispatch intercept configuration update.");
+                    }
                     last_spec = Some(spec);
                     log::info!("Network block policy watcher loaded {}", path.display());
                 }

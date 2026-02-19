@@ -194,16 +194,16 @@ impl InterceptConf {
 
 static INTERCEPT_CONF_STATE: LazyLock<RwLock<InterceptConf>> =
     LazyLock::new(|| RwLock::new(InterceptConf::disabled()));
+static STARTUP_INTERCEPT_CONF_STATE: LazyLock<RwLock<Option<InterceptConf>>> =
+    LazyLock::new(|| RwLock::new(None));
 
 #[derive(Debug, Clone)]
 pub struct NetworkBlockPolicy {
     pub enabled: bool,
     pub blocked_paths: Vec<String>,
-    pub block_pids: Vec<u32>,
     pub block_udp_ports: Vec<u16>,
     pub block_tcp_ports: Vec<u16>,
     pub block_remote_cidrs: Vec<IpNet>,
-    pub blocked_pid_exceptions: Vec<u32>,
     pub blocked_cidr_exceptions: Vec<IpNet>,
     pub log_decisions: bool,
 }
@@ -215,15 +215,13 @@ struct RawConfigDocument {
     #[serde(default)]
     blocked_paths: Vec<String>,
     #[serde(default)]
-    block_pids: Vec<u32>,
+    whitelisted_paths: Vec<String>,
     #[serde(default)]
     block_udp_ports: Vec<u16>,
     #[serde(default)]
     block_tcp_ports: Vec<u16>,
     #[serde(default)]
     block_remote_cidrs: Vec<String>,
-    #[serde(default)]
-    blocked_pid_exceptions: Vec<u32>,
     #[serde(default)]
     blocked_cidr_exceptions: Vec<String>,
     #[serde(default = "default_log_decisions")]
@@ -243,11 +241,9 @@ impl NetworkBlockPolicy {
         Ok(Self {
             enabled: raw.enabled,
             blocked_paths: normalize_patterns(raw.blocked_paths.clone()),
-            block_pids: raw.block_pids.clone(),
             block_udp_ports: raw.block_udp_ports.clone(),
             block_tcp_ports: raw.block_tcp_ports.clone(),
             block_remote_cidrs: parse_cidrs(raw.block_remote_cidrs.clone(), "block_remote_cidrs")?,
-            blocked_pid_exceptions: raw.blocked_pid_exceptions.clone(),
             blocked_cidr_exceptions: parse_cidrs(
                 raw.blocked_cidr_exceptions.clone(),
                 "blocked_cidr_exceptions",
@@ -274,26 +270,10 @@ impl NetworkBlockPolicy {
             });
         }
 
-        if self.blocked_pid_exceptions.contains(&info.pid) {
-            return Some(DropDecision {
-                drop: false,
-                reason: "blocked_pid_exception",
-                log: self.log_decisions,
-            });
-        }
-
         if ip_in_any_cidr(dst_addr.ip(), &self.blocked_cidr_exceptions) {
             return Some(DropDecision {
                 drop: false,
                 reason: "blocked_cidr_exception",
-                log: self.log_decisions,
-            });
-        }
-
-        if self.block_pids.contains(&info.pid) {
-            return Some(DropDecision {
-                drop: true,
-                reason: "block_pid",
                 log: self.log_decisions,
             });
         }
@@ -339,6 +319,14 @@ pub fn set_intercept_conf(conf: InterceptConf) {
     }
 }
 
+pub fn set_startup_intercept_conf(conf: InterceptConf) {
+    if let Ok(mut guard) = STARTUP_INTERCEPT_CONF_STATE.write()
+        && guard.is_none()
+    {
+        *guard = Some(conf);
+    }
+}
+
 pub fn get_intercept_conf() -> InterceptConf {
     INTERCEPT_CONF_STATE
         .read()
@@ -346,20 +334,24 @@ pub fn get_intercept_conf() -> InterceptConf {
         .unwrap_or_else(|_| InterceptConf::disabled())
 }
 
-pub fn load_config_document(value: &str) -> Result<(), anyhow::Error> {
+pub fn load_config_document(value: &str) -> Result<InterceptConf, anyhow::Error> {
     let value = value.trim();
     if value.is_empty() {
-        // An empty policy file intentionally means "allow everything" by disabling
-        // all network drop policy checks.
+        // An empty policy file intentionally means "allow everything" for network
+        // drop checks while preserving the startup redirector interception spec.
         set_network_block_policy(None);
-        return Ok(());
+        let conf = prepend_startup_intercept_conf(InterceptConf::disabled());
+        set_intercept_conf(conf.clone());
+        return Ok(conf);
     }
 
     let raw: RawConfigDocument =
         serde_json::from_str(value).context("failed to parse config JSON document")?;
     let policy = NetworkBlockPolicy::from_raw(&raw)?;
+    let intercept_conf = prepend_startup_intercept_conf(build_redirector_intercept_conf(&raw)?);
     set_network_block_policy(Some(policy));
-    Ok(())
+    set_intercept_conf(intercept_conf.clone());
+    Ok(intercept_conf)
 }
 
 pub fn set_network_block_policy(policy: Option<NetworkBlockPolicy>) {
@@ -389,6 +381,46 @@ fn normalize_patterns(values: Vec<String>) -> Vec<String> {
         .map(|v| v.trim().to_ascii_lowercase())
         .filter(|v| !v.is_empty())
         .collect()
+}
+
+fn normalize_intercept_patterns(values: Vec<String>) -> Vec<String> {
+    values
+        .into_iter()
+        .map(|v| v.trim().trim_start_matches('!').to_string())
+        .filter(|v| !v.is_empty())
+        .collect()
+}
+
+fn build_redirector_intercept_conf(raw: &RawConfigDocument) -> Result<InterceptConf, anyhow::Error> {
+    let actions = normalize_intercept_patterns(raw.whitelisted_paths.clone())
+        .into_iter()
+        .map(|pattern| format!("!{pattern}"))
+        .collect::<Vec<_>>();
+    InterceptConf::try_from(actions).context("failed to build redirector intercept configuration")
+}
+
+fn prepend_startup_intercept_conf(conf: InterceptConf) -> InterceptConf {
+    let policy_actions = conf.actions.clone();
+
+    let Some(startup_conf) = STARTUP_INTERCEPT_CONF_STATE
+        .read()
+        .ok()
+        .and_then(|guard| guard.clone())
+    else {
+        log::info!(
+            "No startup intercept config available, using policy intercept config only (policy_actions={policy_actions:?})."
+        );
+        return conf;
+    };
+
+    let startup_actions = startup_conf.actions.clone();
+    let mut actions = startup_conf.actions;
+    actions.extend(conf.actions);
+    let effective_actions = actions.clone();
+    log::info!(
+        "Composed intercept config from startup + policy (startup_actions={startup_actions:?}, policy_actions={policy_actions:?}, effective_actions={effective_actions:?})."
+    );
+    InterceptConf::new(actions)
 }
 
 fn parse_cidrs(values: Vec<String>, field: &str) -> Result<Vec<IpNet>, anyhow::Error> {
@@ -483,7 +515,8 @@ mod tests {
             "log_decisions": false
         }"#;
 
-        load_config_document(doc).unwrap();
+        let conf = load_config_document(doc).unwrap();
+        assert!(conf.default());
         let info = ProcessInfo {
             pid: 9000,
             process_name: Some("wireguard.exe".into()),
@@ -491,5 +524,26 @@ mod tests {
         let decision = decide_drop(Transport::Udp, "1.1.1.1:51820".parse().unwrap(), &info);
         assert!(decision.drop);
         assert_eq!(decision.reason, "block_path");
+    }
+
+    #[test]
+    fn test_json_document_whitelisted_paths_to_intercept_conf() {
+        let doc = r#"{
+            "enabled": true,
+            "whitelisted_paths": ["steam.exe", "C:\\Program Files (x86)\\Steam\\"]
+        }"#;
+
+        let conf = load_config_document(doc).unwrap();
+        let steam = ProcessInfo {
+            pid: 1000,
+            process_name: Some("C:\\Program Files (x86)\\Steam\\steam.exe".into()),
+        };
+        let chrome = ProcessInfo {
+            pid: 1001,
+            process_name: Some("C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe".into()),
+        };
+
+        assert!(!conf.should_intercept(&steam));
+        assert!(conf.should_intercept(&chrome));
     }
 }

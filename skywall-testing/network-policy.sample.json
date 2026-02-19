@@ -28,11 +28,9 @@
     "proxifier",
     "charles",
     "fiddler",
-    "burp",
-    "mitmproxy.exe",
-    "mitmdump.exe"
+    "burp"
   ],
-  "block_pids": [],
+  "whitelisted_paths": [],
   "block_udp_ports": [
     500,
     4500,
@@ -50,7 +48,6 @@
     1194
   ],
   "block_remote_cidrs": [],
-  "blocked_pid_exceptions": [],
   "blocked_cidr_exceptions": [],
   "log_decisions": true
 }
