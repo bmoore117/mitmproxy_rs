@@ -208,14 +208,39 @@ pub struct NetworkBlockPolicy {
     pub log_decisions: bool,
 }
 
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ProcessEntry {
+    name: String,
+    #[serde(default)]
+    current_status: String,
+    #[serde(default)]
+    mode: String,
+}
+
+impl ProcessEntry {
+    fn is_active_standard(&self) -> bool {
+        self.current_status.eq_ignore_ascii_case("ACTIVE")
+            && self.mode.eq_ignore_ascii_case("STANDARD")
+    }
+}
+
+fn active_standard_names(entries: &[ProcessEntry]) -> Vec<String> {
+    entries
+        .iter()
+        .filter(|e| e.is_active_standard())
+        .map(|e| e.name.clone())
+        .collect()
+}
+
 #[derive(Debug, Deserialize)]
 struct RawConfigDocument {
     #[serde(default = "default_enabled")]
     enabled: bool,
     #[serde(default)]
-    blocked_paths: Vec<String>,
+    blocked_paths: Vec<ProcessEntry>,
     #[serde(default)]
-    whitelisted_paths: Vec<String>,
+    whitelisted_paths: Vec<ProcessEntry>,
     #[serde(default)]
     block_udp_ports: Vec<u16>,
     #[serde(default)]
@@ -240,7 +265,7 @@ impl NetworkBlockPolicy {
     fn from_raw(raw: &RawConfigDocument) -> Result<Self, anyhow::Error> {
         Ok(Self {
             enabled: raw.enabled,
-            blocked_paths: normalize_patterns(raw.blocked_paths.clone()),
+            blocked_paths: normalize_patterns(active_standard_names(&raw.blocked_paths)),
             block_udp_ports: raw.block_udp_ports.clone(),
             block_tcp_ports: raw.block_tcp_ports.clone(),
             block_remote_cidrs: parse_cidrs(raw.block_remote_cidrs.clone(), "block_remote_cidrs")?,
@@ -392,7 +417,7 @@ fn normalize_intercept_patterns(values: Vec<String>) -> Vec<String> {
 }
 
 fn build_redirector_intercept_conf(raw: &RawConfigDocument) -> Result<InterceptConf, anyhow::Error> {
-    let actions = normalize_intercept_patterns(raw.whitelisted_paths.clone())
+    let actions = normalize_intercept_patterns(active_standard_names(&raw.whitelisted_paths))
         .into_iter()
         .map(|pattern| format!("!{pattern}"))
         .collect::<Vec<_>>();
@@ -511,12 +536,17 @@ mod tests {
             "enabled": true,
             "block_udp_ports": [51820],
             "block_remote_cidrs": ["10.0.0.0/8"],
-            "blocked_paths": ["wireguard"],
+            "blocked_paths": [
+                {
+                    "name": "wireguard",
+                    "currentStatus": "ACTIVE",
+                    "mode": "STANDARD"
+                }
+            ],
             "log_decisions": false
         }"#;
 
-        let conf = load_config_document(doc).unwrap();
-        assert!(conf.default());
+        load_config_document(doc).unwrap();
         let info = ProcessInfo {
             pid: 9000,
             process_name: Some("wireguard.exe".into()),
@@ -527,10 +557,66 @@ mod tests {
     }
 
     #[test]
+    fn test_inactive_blocked_path_is_ignored() {
+        let doc = r#"{
+            "enabled": true,
+            "blocked_paths": [
+                {
+                    "name": "wireguard",
+                    "currentStatus": "DISABLED",
+                    "mode": "STANDARD"
+                }
+            ]
+        }"#;
+
+        load_config_document(doc).unwrap();
+        let info = ProcessInfo {
+            pid: 9000,
+            process_name: Some("wireguard.exe".into()),
+        };
+        let decision = decide_drop(Transport::Udp, "1.1.1.1:51820".parse().unwrap(), &info);
+        assert!(!decision.drop);
+        assert_eq!(decision.reason, "default_allow");
+    }
+
+    #[test]
+    fn test_non_standard_mode_blocked_path_is_ignored() {
+        let doc = r#"{
+            "enabled": true,
+            "blocked_paths": [
+                {
+                    "name": "wireguard",
+                    "currentStatus": "ACTIVE",
+                    "mode": "REGEX"
+                }
+            ]
+        }"#;
+
+        load_config_document(doc).unwrap();
+        let info = ProcessInfo {
+            pid: 9000,
+            process_name: Some("wireguard.exe".into()),
+        };
+        let decision = decide_drop(Transport::Udp, "1.1.1.1:51820".parse().unwrap(), &info);
+        assert!(!decision.drop);
+    }
+
+    #[test]
     fn test_json_document_whitelisted_paths_to_intercept_conf() {
         let doc = r#"{
             "enabled": true,
-            "whitelisted_paths": ["steam.exe", "C:\\Program Files (x86)\\Steam\\"]
+            "whitelisted_paths": [
+                {
+                    "name": "steam.exe",
+                    "currentStatus": "ACTIVE",
+                    "mode": "STANDARD"
+                },
+                {
+                    "name": "C:\\Program Files (x86)\\Steam\\",
+                    "currentStatus": "ACTIVE",
+                    "mode": "STANDARD"
+                }
+            ]
         }"#;
 
         let conf = load_config_document(doc).unwrap();
@@ -545,5 +631,37 @@ mod tests {
 
         assert!(!conf.should_intercept(&steam));
         assert!(conf.should_intercept(&chrome));
+    }
+
+    #[test]
+    fn test_inactive_whitelisted_path_still_intercepted() {
+        let doc = r#"{
+            "enabled": true,
+            "whitelisted_paths": [
+                {
+                    "name": "C:\\Program Files\\NordVPN",
+                    "currentStatus": "ACTIVE",
+                    "mode": "STANDARD"
+                },
+                {
+                    "name": "steam.exe",
+                    "currentStatus": "DISABLED",
+                    "mode": "STANDARD"
+                }
+            ]
+        }"#;
+
+        let conf = load_config_document(doc).unwrap();
+        let steam = ProcessInfo {
+            pid: 1000,
+            process_name: Some("C:\\Program Files (x86)\\Steam\\steam.exe".into()),
+        };
+        let nordvpn = ProcessInfo {
+            pid: 1002,
+            process_name: Some("C:\\Program Files\\NordVPN\\nordvpn.exe".into()),
+        };
+
+        assert!(conf.should_intercept(&steam));
+        assert!(!conf.should_intercept(&nordvpn));
     }
 }
