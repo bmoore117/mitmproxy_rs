@@ -117,32 +117,26 @@ impl Drop for LocalRedirector {
     }
 }
 
-fn config_dir() -> Option<PathBuf> {
-    std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(|p| p.join("config")))
-}
-
 fn resolve_config_path() -> Option<PathBuf> {
-    let config_dir = config_dir();
-    if let Some(ref dir) = config_dir {
-        if dir.is_dir() {
-            let path = dir.join("config.json");
+    #[cfg(windows)]
+    {
+        if let Some(program_data) = std::env::var_os("ProgramData") {
+            let path = PathBuf::from(program_data)
+                .join("SkyWall")
+                .join("filter")
+                .join("config.json");
             log::info!("Using config file: {}", path.display());
             return Some(path);
         }
     }
     if let Some(path) = std::env::var_os("MITMPROXY_NETWORK_POLICY_PATH").map(PathBuf::from) {
         log::info!(
-            "Config directory not found, falling back to MITMPROXY_NETWORK_POLICY_PATH: {}",
+            "Falling back to MITMPROXY_NETWORK_POLICY_PATH: {}",
             path.display()
         );
         return Some(path);
     }
-    log::info!(
-        "No config directory ({}) and MITMPROXY_NETWORK_POLICY_PATH not set",
-        config_dir.map(|d| d.display().to_string()).unwrap_or_default()
-    );
+    log::info!("No config path resolved: ProgramData not set and MITMPROXY_NETWORK_POLICY_PATH not set");
     None
 }
 
