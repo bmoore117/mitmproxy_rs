@@ -1,5 +1,4 @@
 {
-  "enabled": true,
   "blacklisted_paths": [
     { "name": "wireguard", "currentStatus": "ACTIVE", "mode": "STANDARD" },
     { "name": "wg.exe", "currentStatus": "ACTIVE", "mode": "STANDARD" },

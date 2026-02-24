@@ -199,7 +199,6 @@ static STARTUP_INTERCEPT_CONF_STATE: LazyLock<RwLock<Option<InterceptConf>>> =
 
 #[derive(Debug, Clone)]
 pub struct NetworkBlockPolicy {
-    pub enabled: bool,
     pub blacklisted_paths: Vec<String>,
     pub block_udp_ports: Vec<u16>,
     pub block_tcp_ports: Vec<u16>,
@@ -235,8 +234,6 @@ fn active_standard_names(entries: &[ProcessEntry]) -> Vec<String> {
 
 #[derive(Debug, Deserialize)]
 struct RawConfigDocument {
-    #[serde(default = "default_enabled")]
-    enabled: bool,
     #[serde(default)]
     blacklisted_paths: Vec<ProcessEntry>,
     #[serde(default)]
@@ -253,10 +250,6 @@ struct RawConfigDocument {
     log_decisions: bool,
 }
 
-fn default_enabled() -> bool {
-    true
-}
-
 fn default_log_decisions() -> bool {
     true
 }
@@ -264,7 +257,6 @@ fn default_log_decisions() -> bool {
 impl NetworkBlockPolicy {
     fn from_raw(raw: &RawConfigDocument) -> Result<Self, anyhow::Error> {
         Ok(Self {
-            enabled: raw.enabled,
             blacklisted_paths: normalize_patterns(active_standard_names(&raw.blacklisted_paths)),
             block_udp_ports: raw.block_udp_ports.clone(),
             block_tcp_ports: raw.block_tcp_ports.clone(),
@@ -283,10 +275,6 @@ impl NetworkBlockPolicy {
         dst_addr: SocketAddr,
         info: &ProcessInfo,
     ) -> Option<DropDecision> {
-        if !self.enabled {
-            return None;
-        }
-
         if is_safety_exempt(info.process_name.as_deref()) {
             return Some(DropDecision {
                 drop: false,
@@ -533,7 +521,6 @@ mod tests {
     #[test]
     fn test_json_document_loading_and_decision() {
         let doc = r#"{
-            "enabled": true,
             "block_udp_ports": [51820],
             "block_remote_cidrs": ["10.0.0.0/8"],
             "blacklisted_paths": [
@@ -559,7 +546,6 @@ mod tests {
     #[test]
     fn test_inactive_blocked_path_is_ignored() {
         let doc = r#"{
-            "enabled": true,
             "blacklisted_paths": [
                 {
                     "name": "wireguard",
@@ -582,7 +568,6 @@ mod tests {
     #[test]
     fn test_non_standard_mode_blocked_path_is_ignored() {
         let doc = r#"{
-            "enabled": true,
             "blacklisted_paths": [
                 {
                     "name": "wireguard",
@@ -604,7 +589,6 @@ mod tests {
     #[test]
     fn test_json_document_whitelisted_paths_to_intercept_conf() {
         let doc = r#"{
-            "enabled": true,
             "whitelisted_paths": [
                 {
                     "name": "steam.exe",
@@ -636,7 +620,6 @@ mod tests {
     #[test]
     fn test_inactive_whitelisted_path_still_intercepted() {
         let doc = r#"{
-            "enabled": true,
             "whitelisted_paths": [
                 {
                     "name": "C:\\Program Files\\NordVPN",

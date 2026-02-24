@@ -102,7 +102,7 @@ If you intentionally use exceptions:
   - Remove broad port entries first (for example 8080/9090).
   - Prefer process/path rules over port-only blocking.
 - No blocks at all:
-  - Confirm file is valid JSON and `enabled` is `true`.
+  - Confirm file is valid JSON
   - Confirm expected process path actually contains one of `blacklisted_paths` tokens.
 
 ## Pass Criteria
