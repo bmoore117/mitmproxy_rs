@@ -200,7 +200,7 @@ static STARTUP_INTERCEPT_CONF_STATE: LazyLock<RwLock<Option<InterceptConf>>> =
 #[derive(Debug, Clone)]
 pub struct NetworkBlockPolicy {
     pub enabled: bool,
-    pub blocked_paths: Vec<String>,
+    pub blacklisted_paths: Vec<String>,
     pub block_udp_ports: Vec<u16>,
     pub block_tcp_ports: Vec<u16>,
     pub block_remote_cidrs: Vec<IpNet>,
@@ -238,7 +238,7 @@ struct RawConfigDocument {
     #[serde(default = "default_enabled")]
     enabled: bool,
     #[serde(default)]
-    blocked_paths: Vec<ProcessEntry>,
+    blacklisted_paths: Vec<ProcessEntry>,
     #[serde(default)]
     whitelisted_paths: Vec<ProcessEntry>,
     #[serde(default)]
@@ -265,7 +265,7 @@ impl NetworkBlockPolicy {
     fn from_raw(raw: &RawConfigDocument) -> Result<Self, anyhow::Error> {
         Ok(Self {
             enabled: raw.enabled,
-            blocked_paths: normalize_patterns(active_standard_names(&raw.blocked_paths)),
+            blacklisted_paths: normalize_patterns(active_standard_names(&raw.blacklisted_paths)),
             block_udp_ports: raw.block_udp_ports.clone(),
             block_tcp_ports: raw.block_tcp_ports.clone(),
             block_remote_cidrs: parse_cidrs(raw.block_remote_cidrs.clone(), "block_remote_cidrs")?,
@@ -303,7 +303,7 @@ impl NetworkBlockPolicy {
             });
         }
 
-        if matches_any_process(info.process_name.as_deref(), &self.blocked_paths) {
+        if matches_any_process(info.process_name.as_deref(), &self.blacklisted_paths) {
             return Some(DropDecision {
                 drop: true,
                 reason: "block_path",
@@ -536,7 +536,7 @@ mod tests {
             "enabled": true,
             "block_udp_ports": [51820],
             "block_remote_cidrs": ["10.0.0.0/8"],
-            "blocked_paths": [
+            "blacklisted_paths": [
                 {
                     "name": "wireguard",
                     "currentStatus": "ACTIVE",
@@ -560,7 +560,7 @@ mod tests {
     fn test_inactive_blocked_path_is_ignored() {
         let doc = r#"{
             "enabled": true,
-            "blocked_paths": [
+            "blacklisted_paths": [
                 {
                     "name": "wireguard",
                     "currentStatus": "DISABLED",
@@ -583,7 +583,7 @@ mod tests {
     fn test_non_standard_mode_blocked_path_is_ignored() {
         let doc = r#"{
             "enabled": true,
-            "blocked_paths": [
+            "blacklisted_paths": [
                 {
                     "name": "wireguard",
                     "currentStatus": "ACTIVE",

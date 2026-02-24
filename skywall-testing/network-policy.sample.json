@@ -1,6 +1,6 @@
 {
   "enabled": true,
-  "blocked_paths": [
+  "blacklisted_paths": [
     { "name": "wireguard", "currentStatus": "ACTIVE", "mode": "STANDARD" },
     { "name": "wg.exe", "currentStatus": "ACTIVE", "mode": "STANDARD" },
     { "name": "openvpn", "currentStatus": "ACTIVE", "mode": "STANDARD" },

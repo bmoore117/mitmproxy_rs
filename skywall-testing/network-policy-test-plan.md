@@ -4,7 +4,7 @@ This plan validates `network-policy.sample.json` with local redirect mode and ho
 
 ## Scope
 
-- Validate process/path blocking (`blocked_paths`)
+- Validate process/path blocking (`blacklisted_paths`)
 - Validate port blocking (`block_udp_ports`, `block_tcp_ports`)
 - Validate baseline usability (normal traffic not on blocked signals)
 - Validate live policy reload behavior
@@ -42,7 +42,7 @@ This plan validates `network-policy.sample.json` with local redirect mode and ho
 ## T2: Process blocking (path substring)
 
 - Action:
-  - Start a known VPN or proxy app listed in `blocked_paths` (for example NordVPN/WireGuard/OpenVPN/Tailscale/Clash/Proxifier/Charles/Fiddler/Burp).
+  - Start a known VPN or proxy app listed in `blacklisted_paths` (for example NordVPN/WireGuard/OpenVPN/Tailscale/Clash/Proxifier/Charles/Fiddler/Burp).
   - Trigger network activity (for example VPN connect or proxy request).
 - Expected:
   - Connection attempts fail quickly or app behavior indicates blocked networking.
@@ -103,7 +103,7 @@ If you intentionally use exceptions:
   - Prefer process/path rules over port-only blocking.
 - No blocks at all:
   - Confirm file is valid JSON and `enabled` is `true`.
-  - Confirm expected process path actually contains one of `blocked_paths` tokens.
+  - Confirm expected process path actually contains one of `blacklisted_paths` tokens.
 
 ## Pass Criteria
 
