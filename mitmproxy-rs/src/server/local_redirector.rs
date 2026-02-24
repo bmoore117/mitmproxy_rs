@@ -117,10 +117,39 @@ impl Drop for LocalRedirector {
     }
 }
 
+fn config_dir() -> Option<PathBuf> {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|p| p.join("config")))
+}
+
+fn resolve_config_path() -> Option<PathBuf> {
+    let config_dir = config_dir();
+    if let Some(ref dir) = config_dir {
+        if dir.is_dir() {
+            let path = dir.join("config.json");
+            log::info!("Using config file: {}", path.display());
+            return Some(path);
+        }
+    }
+    if let Some(path) = std::env::var_os("MITMPROXY_NETWORK_POLICY_PATH").map(PathBuf::from) {
+        log::info!(
+            "Config directory not found, falling back to MITMPROXY_NETWORK_POLICY_PATH: {}",
+            path.display()
+        );
+        return Some(path);
+    }
+    log::info!(
+        "No config directory ({}) and MITMPROXY_NETWORK_POLICY_PATH not set",
+        config_dir.map(|d| d.display().to_string()).unwrap_or_default()
+    );
+    None
+}
+
 fn start_intercept_watcher(
     conf_tx: mpsc::UnboundedSender<InterceptConf>,
 ) -> Option<InterceptWatcher> {
-    let path = std::env::var_os("MITMPROXY_NETWORK_POLICY_PATH").map(PathBuf::from)?;
+    let config_path = resolve_config_path()?;
     let (stop_tx, stop_rx) = std_mpsc::channel();
 
     std::thread::spawn(move || {
@@ -135,19 +164,19 @@ fn start_intercept_watcher(
             }
         };
 
-        if let Err(err) = watcher.watch(&path, RecursiveMode::NonRecursive) {
-            log::warn!("Failed to watch {}: {err:?}", path.display());
+        if let Err(err) = watcher.watch(&config_path, RecursiveMode::NonRecursive) {
+            log::warn!("Failed to watch {}: {err:?}", config_path.display());
             return;
         }
 
         let mut last_spec: Option<String> = None;
         let mut reload = || {
-            let content = match std::fs::read_to_string(&path) {
+            let content = match std::fs::read_to_string(&config_path) {
                 Ok(content) => content,
                 Err(err) => {
                     log::warn!(
                         "Intercept watcher failed to read {}: {err:?}",
-                        path.display()
+                        config_path.display()
                     );
                     return;
                 }
@@ -156,18 +185,18 @@ fn start_intercept_watcher(
             if last_spec.as_deref() == Some(&spec) {
                 return;
             }
-            match load_config_document(spec.as_str()) {
+            match load_config_document(&spec) {
                 Ok(conf) => {
                     if conf_tx.send(conf).is_err() {
                         log::warn!("Failed to dispatch intercept configuration update.");
                     }
                     last_spec = Some(spec);
-                    log::info!("Network block policy watcher loaded {}", path.display());
+                    log::info!("Network block policy watcher loaded {}", config_path.display());
                 }
                 Err(err) => {
                     log::warn!(
                         "Invalid network block policy in {}: {err:?}",
-                        path.display()
+                        config_path.display()
                     );
                 }
             }
@@ -182,7 +211,7 @@ fn start_intercept_watcher(
             match event_rx.recv_timeout(Duration::from_millis(250)) {
                 Ok(Ok(_event)) => reload(),
                 Ok(Err(err)) => {
-                    log::debug!("Watch error for {}: {err:?}", path.display());
+                    log::debug!("Watch error for {}: {err:?}", config_path.display());
                 }
                 Err(std_mpsc::RecvTimeoutError::Timeout) => {}
                 Err(std_mpsc::RecvTimeoutError::Disconnected) => break,
