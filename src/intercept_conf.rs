@@ -233,7 +233,15 @@ fn active_standard_names(entries: &[ProcessEntry]) -> Vec<String> {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct RawConfigDocument {
+    #[serde(default)]
+    network: RawNetworkConfig,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct RawNetworkConfig {
     #[serde(default)]
     blacklisted_paths: Vec<ProcessEntry>,
     #[serde(default)]
@@ -255,7 +263,7 @@ fn default_log_decisions() -> bool {
 }
 
 impl NetworkBlockPolicy {
-    fn from_raw(raw: &RawConfigDocument) -> Result<Self, anyhow::Error> {
+    fn from_raw(raw: &RawNetworkConfig) -> Result<Self, anyhow::Error> {
         Ok(Self {
             blacklisted_paths: normalize_patterns(active_standard_names(&raw.blacklisted_paths)),
             block_udp_ports: raw.block_udp_ports.clone(),
@@ -360,8 +368,9 @@ pub fn load_config_document(value: &str) -> Result<InterceptConf, anyhow::Error>
 
     let raw: RawConfigDocument =
         serde_json::from_str(value).context("failed to parse config JSON document")?;
-    let policy = NetworkBlockPolicy::from_raw(&raw)?;
-    let intercept_conf = prepend_startup_intercept_conf(build_redirector_intercept_conf(&raw)?);
+    let policy = NetworkBlockPolicy::from_raw(&raw.network)?;
+    let intercept_conf =
+        prepend_startup_intercept_conf(build_redirector_intercept_conf(&raw.network)?);
     set_network_block_policy(Some(policy));
     set_intercept_conf(intercept_conf.clone());
     Ok(intercept_conf)
@@ -404,7 +413,7 @@ fn normalize_intercept_patterns(values: Vec<String>) -> Vec<String> {
         .collect()
 }
 
-fn build_redirector_intercept_conf(raw: &RawConfigDocument) -> Result<InterceptConf, anyhow::Error> {
+fn build_redirector_intercept_conf(raw: &RawNetworkConfig) -> Result<InterceptConf, anyhow::Error> {
     let actions = normalize_intercept_patterns(active_standard_names(&raw.whitelisted_paths))
         .into_iter()
         .map(|pattern| format!("!{pattern}"))
@@ -521,16 +530,19 @@ mod tests {
     #[test]
     fn test_json_document_loading_and_decision() {
         let doc = r#"{
-            "block_udp_ports": [51820],
-            "block_remote_cidrs": ["10.0.0.0/8"],
-            "blacklisted_paths": [
-                {
-                    "name": "wireguard",
-                    "currentStatus": "ACTIVE",
-                    "mode": "STANDARD"
-                }
-            ],
-            "log_decisions": false
+            "filterActive": true,
+            "network": {
+                "blockUdpPorts": [51820],
+                "blockRemoteCidrs": ["10.0.0.0/8"],
+                "blacklistedPaths": [
+                    {
+                        "name": "wireguard",
+                        "currentStatus": "ACTIVE",
+                        "mode": "STANDARD"
+                    }
+                ],
+                "logDecisions": false
+            }
         }"#;
 
         load_config_document(doc).unwrap();
@@ -546,13 +558,15 @@ mod tests {
     #[test]
     fn test_inactive_blocked_path_is_ignored() {
         let doc = r#"{
-            "blacklisted_paths": [
-                {
-                    "name": "wireguard",
-                    "currentStatus": "DISABLED",
-                    "mode": "STANDARD"
-                }
-            ]
+            "network": {
+                "blacklistedPaths": [
+                    {
+                        "name": "wireguard",
+                        "currentStatus": "DISABLED",
+                        "mode": "STANDARD"
+                    }
+                ]
+            }
         }"#;
 
         load_config_document(doc).unwrap();
@@ -568,13 +582,15 @@ mod tests {
     #[test]
     fn test_non_standard_mode_blocked_path_is_ignored() {
         let doc = r#"{
-            "blacklisted_paths": [
-                {
-                    "name": "wireguard",
-                    "currentStatus": "ACTIVE",
-                    "mode": "REGEX"
-                }
-            ]
+            "network": {
+                "blacklistedPaths": [
+                    {
+                        "name": "wireguard",
+                        "currentStatus": "ACTIVE",
+                        "mode": "REGEX"
+                    }
+                ]
+            }
         }"#;
 
         load_config_document(doc).unwrap();
@@ -589,18 +605,20 @@ mod tests {
     #[test]
     fn test_json_document_whitelisted_paths_to_intercept_conf() {
         let doc = r#"{
-            "whitelisted_paths": [
-                {
-                    "name": "steam.exe",
-                    "currentStatus": "ACTIVE",
-                    "mode": "STANDARD"
-                },
-                {
-                    "name": "C:\\Program Files (x86)\\Steam\\",
-                    "currentStatus": "ACTIVE",
-                    "mode": "STANDARD"
-                }
-            ]
+            "network": {
+                "whitelistedPaths": [
+                    {
+                        "name": "steam.exe",
+                        "currentStatus": "ACTIVE",
+                        "mode": "STANDARD"
+                    },
+                    {
+                        "name": "C:\\Program Files (x86)\\Steam\\",
+                        "currentStatus": "ACTIVE",
+                        "mode": "STANDARD"
+                    }
+                ]
+            }
         }"#;
 
         let conf = load_config_document(doc).unwrap();
@@ -620,18 +638,20 @@ mod tests {
     #[test]
     fn test_inactive_whitelisted_path_still_intercepted() {
         let doc = r#"{
-            "whitelisted_paths": [
-                {
-                    "name": "C:\\Program Files\\NordVPN",
-                    "currentStatus": "ACTIVE",
-                    "mode": "STANDARD"
-                },
-                {
-                    "name": "steam.exe",
-                    "currentStatus": "DISABLED",
-                    "mode": "STANDARD"
-                }
-            ]
+            "network": {
+                "whitelistedPaths": [
+                    {
+                        "name": "C:\\Program Files\\NordVPN",
+                        "currentStatus": "ACTIVE",
+                        "mode": "STANDARD"
+                    },
+                    {
+                        "name": "steam.exe",
+                        "currentStatus": "DISABLED",
+                        "mode": "STANDARD"
+                    }
+                ]
+            }
         }"#;
 
         let conf = load_config_document(doc).unwrap();
