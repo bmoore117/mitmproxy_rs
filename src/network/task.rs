@@ -1,6 +1,7 @@
 use std::fmt;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
 use std::time::Duration;
 use tokio::sync::{
@@ -12,6 +13,17 @@ use tokio::task::JoinHandle;
 use crate::messages::{NetworkCommand, NetworkEvent, TransportCommand, TransportEvent};
 use crate::network::core::NetworkStack;
 use crate::shutdown;
+
+/// Convert a panic payload to a human-readable string for logging.
+fn panic_message(panic: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = panic.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = panic.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        format!("{:?}", panic)
+    }
+}
 
 pub struct NetworkTask<'a> {
     net_tx: Sender<NetworkCommand>,
@@ -101,10 +113,35 @@ impl NetworkTask<'_> {
                 // ...or process incoming packets
                 Some(e) = self.net_rx.recv(), if py_tx_available => {
                     // handle pending network events until channel is full
-                    self.io.handle_network_event(e, py_tx_permit.take().unwrap())?;
+                    let permit = py_tx_permit.take().unwrap();
+                    let io = &mut self.io;
+                    match catch_unwind(AssertUnwindSafe(move || io.handle_network_event(e, permit)))
+                    {
+                        Ok(inner) => inner?,
+                        Err(panic) => {
+                            let msg = panic_message(panic);
+                            log::error!(
+                                "smoltcp panic (e.g. TCP sequence number underflow), \
+                                 network task exiting for graceful shutdown: {msg}"
+                            );
+                            return Err(anyhow!("TCP stack error: {msg}"));
+                        }
+                    }
                     while let Ok(p) = self.py_tx.try_reserve() {
                         if let Ok(e) = self.net_rx.try_recv() {
-                            self.io.handle_network_event(e, p)?;
+                            let io = &mut self.io;
+                            match catch_unwind(AssertUnwindSafe(move || io.handle_network_event(e, p)))
+                            {
+                                Ok(inner) => inner?,
+                                Err(panic) => {
+                                    let msg = panic_message(panic);
+                                    log::error!(
+                                        "smoltcp panic (e.g. TCP sequence number underflow), \
+                                         network task exiting for graceful shutdown: {msg}"
+                                    );
+                                    return Err(anyhow!("TCP stack error: {msg}"));
+                                }
+                            }
                         } else {
                             break;
                         }
@@ -129,7 +166,18 @@ impl NetworkTask<'_> {
                 },
             }
 
-            self.io.poll()?;
+            let io = &mut self.io;
+            match catch_unwind(AssertUnwindSafe(move || io.poll())) {
+                Ok(inner) => inner?,
+                Err(panic) => {
+                    let msg = panic_message(panic);
+                    log::error!(
+                        "smoltcp panic (e.g. TCP sequence number underflow), \
+                         network task exiting for graceful shutdown: {msg}"
+                    );
+                    return Err(anyhow!("TCP stack error: {msg}"));
+                }
+            }
             delay = self.io.poll_delay();
         }
 
