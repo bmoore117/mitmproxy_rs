@@ -226,8 +226,8 @@ fn start_intercept_watcher(
 #[allow(unused_variables)]
 pub fn start_local_redirector(
     py: Python<'_>,
-    handle_tcp_stream: PyObject,
-    handle_udp_stream: PyObject,
+    handle_tcp_stream: Py<PyAny>,
+    handle_udp_stream: Py<PyAny>,
 ) -> PyResult<Bound<'_, PyAny>> {
     #[cfg(windows)]
     {

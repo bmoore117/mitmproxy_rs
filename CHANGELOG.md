@@ -1,11 +1,22 @@
 ## Unreleased: mitmproxy_rs next
 
 
+## 20 July 2026: mitmproxy_rs 0.12.11
+
+- Add IPv6 support to Linux local capture mode.
+
+## 17 July 2026: mitmproxy_rs 0.12.10
+
+- Fix UDP connection establishment on IPv6-only networks.
+- Fix Linux local mode missing traffic from non-main threads
+
 ## 30 January 2026: mitmproxy_rs 0.12.9
 
+- Update to Rust Edition 2024.
 
 ## 22 November 2025: mitmproxy_rs 0.12.8
 
+- Fix some bugs related to process icon creation.
 
 ## 15 July 2025: mitmproxy_rs 0.12.7
 

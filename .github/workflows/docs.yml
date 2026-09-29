@@ -22,7 +22,7 @@ jobs:
       # TODO: This should ideally just reuse the main CI artifacts.
       - uses: mhils/workflows/checkout@5b6540d578f48644ffa5e955cedadc81034cb7d8  # v18.0
       - uses: ./.github/actions/setup
-      - uses: install-pinned/maturin-with-zig@4d1a9421a8c84036989276ddf3dbd24aa48b8111
+      - uses: install-pinned/maturin-with-zig@7f54e6144d8fd17188d0e99742fefc4bcb178e06
       - uses: install-pinned/mypy@75779f141592e4909d64e13f8a1861f06aa9cd8d
       - uses: install-pinned/pdoc@69ba59f9699df21e1026110af4ec6b10a98cf5cd
 
@@ -34,7 +34,7 @@ jobs:
 
       - run: pdoc -o docs/ mitmproxy_rs
 
-      - uses: actions/upload-pages-artifact@v4
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with:
           path: docs/
 
@@ -52,4 +52,4 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5
